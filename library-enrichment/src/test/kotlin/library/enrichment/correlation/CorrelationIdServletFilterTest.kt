@@ -20,7 +20,7 @@ internal class CorrelationIdServletFilterTest {
     val filterChain: FilterChain = mock()
 
     @Test fun `correlation ID is taken from request and removed when request was processed`() {
-        given { request.getHeader("X-Correlation-ID") } willReturn { "abc-123" }
+        given { request.getHeader("X-B3-TraceId") } willReturn { "abc-123" }
 
         cut.doFilter(request, response, filterChain)
 
@@ -32,7 +32,7 @@ internal class CorrelationIdServletFilterTest {
     }
 
     @Test fun `if no correlation ID is provided one is generated`() {
-        given { request.getHeader("X-Correlation-ID") } willReturn { null }
+        given { request.getHeader("X-B3-TraceId") } willReturn { null }
 
         cut.doFilter(request, response, filterChain)
 
@@ -44,23 +44,23 @@ internal class CorrelationIdServletFilterTest {
     }
 
     @Test fun `custom correlation ID header is set on response`() {
-        given { request.getHeader("X-Correlation-ID") } willReturn { "abc-123" }
+        given { request.getHeader("X-B3-TraceId") } willReturn { "abc-123" }
 
         cut.doFilter(request, response, filterChain)
 
         with(inOrder(response, filterChain)) {
-            verify(response).setHeader("X-Correlation-ID", "abc-123")
+            verify(response).setHeader("X-B3-TraceId", "abc-123")
             verify(filterChain).doFilter(request, response)
         }
     }
 
     @Test fun `generated correlation ID header is set on response`() {
-        given { request.getHeader("X-Correlation-ID") } willReturn { null }
+        given { request.getHeader("X-B3-TraceId") } willReturn { null }
 
         cut.doFilter(request, response, filterChain)
 
         with(inOrder(response, filterChain)) {
-            verify(response).setHeader(eq("X-Correlation-ID"), check {
+            verify(response).setHeader(eq("X-B3-TraceId"), check {
                 UUID.fromString(it) // valid UUID
             })
             verify(filterChain).doFilter(request, response)

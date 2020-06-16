@@ -56,7 +56,7 @@ internal class LibraryIntegrationTest {
             client.ping()
             verify(getRequestedFor(urlEqualTo("/api"))
                     .withHeader("Authorization", equalTo("Basic Y3VyYXRvcjpjdXJhdG9y"))
-                    .withHeader("X-Correlation-ID", equalTo(correlationId)))
+                    .withHeader("X-B3-TraceId", equalTo(correlationId)))
         }
 
         @ValueSource(ints = [400, 401, 403, 404, 500])
@@ -82,7 +82,7 @@ internal class LibraryIntegrationTest {
             verify(putRequestedFor(urlEqualTo("/api/books/${bookId}/authors"))
                     .withHeader("Content-Type", equalTo("application/json"))
                     .withHeader("Authorization", equalTo("Basic Y3VyYXRvcjpjdXJhdG9y"))
-                    .withHeader("X-Correlation-ID", equalTo(correlationId))
+                    .withHeader("X-B3-TraceId", equalTo(correlationId))
                     .withRequestBody(equalToJson(
                             """{ "authors": ["J.R.R. Tolkien", "Jim Butcher"] }"""
                     )))
@@ -121,7 +121,7 @@ internal class LibraryIntegrationTest {
             verify(putRequestedFor(urlEqualTo("/api/books/${bookId}/numberOfPages"))
                     .withHeader("Content-Type", equalTo("application/json"))
                     .withHeader("Authorization", equalTo("Basic Y3VyYXRvcjpjdXJhdG9y"))
-                    .withHeader("X-Correlation-ID", equalTo(correlationId))
+                    .withHeader("X-B3-TraceId", equalTo(correlationId))
                     .withRequestBody(equalToJson(
                             """{ "numberOfPages": 256 }"""
                     )))

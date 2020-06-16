@@ -15,6 +15,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 import utils.Books
 import utils.assertThrows
 import utils.classification.UnitTest
@@ -28,44 +30,50 @@ internal class BookCollectionTest {
     val fixedClock = clockWithFixedTime(fixedTimestamp)
 
     val dataStore: BookDataStore = mockk {
-        every { createOrUpdate(any()) } answers { firstArg() }
+        every { createOrUpdate(any()) } answers { Mono.just(firstArg()) }
     }
-    val idGenerator: BookIdGenerator = BookIdGenerator(dataStore)
+    val idGenerator = BookIdGenerator(dataStore)
     val eventDispatcher: EventDispatcher<BookEvent> = mockk()
 
     val cut = BookCollection(fixedClock, dataStore, idGenerator, eventDispatcher)
 
-    @BeforeEach fun setupMocks() {
-        every { dataStore.existsById(any()) } returns false
-        every { dataStore.delete(any()) } returns Unit
-        every { eventDispatcher.dispatch(any()) } returns Unit
+    @BeforeEach
+    fun setupMocks() {
+        every { dataStore.existsById(any()) } returns Mono.just(false)
+        every { dataStore.delete(any()) } returns Mono.empty()
+        every { eventDispatcher.dispatch(any()) } just Runs
     }
 
-    @Nested inner class `adding a book` {
+    @Nested
+    inner class `adding a book` {
 
-        @Test fun `generates a new book ID`() {
-            with(cut.addBook(Books.THE_MARTIAN)) {
-                assertThat(id).isNotNull()
+        @Test
+        fun `generates a new book ID`() {
+            with(cut.addBook(Books.THE_MARTIAN).block()!!) {
+                assertThat(id).isNotNull
             }
         }
 
-        @Test fun `sets the initial state to available`() {
-            with(cut.addBook(Books.THE_MARTIAN)) {
+        @Test
+        fun `sets the initial state to available`() {
+            with(cut.addBook(Books.THE_MARTIAN).block()!!) {
                 assertThat(state).isEqualTo(Available)
             }
         }
 
-        @Test fun `stores the book's data`() {
-            with(cut.addBook(Books.THE_MARTIAN)) {
+        @Test
+        fun `stores the book's data`() {
+            with(cut.addBook(Books.THE_MARTIAN).block()!!) {
                 assertThat(book).isEqualTo(Books.THE_MARTIAN)
             }
         }
 
-        @Test fun `dispatches a BookAdded event`() {
+        @Test
+        fun `dispatches a BookAdded event`() {
             val eventSlot = slot<BookAdded>()
-            every { eventDispatcher.dispatch(capture(eventSlot)) } returns Unit
+            every { eventDispatcher.dispatch(capture(eventSlot)) } just Runs
 
-            val bookRecord = cut.addBook(Books.THE_MARTIAN)
+            val bookRecord = cut.addBook(Books.THE_MARTIAN).block()!!
 
             with(eventSlot.captured) {
                 assertThat(bookId).isEqualTo("${bookRecord.id}")
@@ -73,230 +81,258 @@ internal class BookCollectionTest {
             }
         }
 
-        @Test fun `does not dispatch any events in case of an exception`() {
-            every { dataStore.createOrUpdate(any()) } throws RuntimeException()
+        @Test
+        fun `does not dispatch any events in case of an exception`() {
+            every { dataStore.createOrUpdate(any()) } returns Mono.error(RuntimeException())
             assertThrows(RuntimeException::class) {
-                cut.addBook(Books.THE_MARTIAN)
+                cut.addBook(Books.THE_MARTIAN).block()
             }
             confirmVerified(eventDispatcher)
         }
 
     }
 
-    @Nested inner class `updating a book` {
+    @Nested
+    inner class `updating a book` {
 
         val id = BookId.generate()
         val bookRecord = BookRecord(id, Books.THE_DARK_TOWER_VII)
         val updatedBookRecord = bookRecord.changeNumberOfPages(42)
 
-        @Test fun `updates the record in the database`() {
-            every { dataStore.findById(id) } returns bookRecord
+        @Test
+        fun `updates the record in the database`() {
+            every { dataStore.findById(id) } returns Mono.just(bookRecord)
 
-            val updatedBook = cut.updateBook(id) { updatedBookRecord }
+            val updatedBook = cut.updateBook(id) { updatedBookRecord }.block()!!
 
             assertThat(updatedBook).isEqualTo(updatedBook)
             verify { dataStore.createOrUpdate(updatedBook) }
         }
 
-        @Test fun `dispatches a BookUpdated event`() {
+        @Test
+        fun `dispatches a BookUpdated event`() {
             val eventSlot = slot<BookUpdated>()
-            every { eventDispatcher.dispatch(capture(eventSlot)) } returns Unit
-            every { dataStore.findById(id) } returns bookRecord
+            every { eventDispatcher.dispatch(capture(eventSlot)) } just Runs
+            every { dataStore.findById(id) } returns Mono.just(bookRecord)
 
-            cut.updateBook(id) { updatedBookRecord }
+            cut.updateBook(id) { updatedBookRecord }.block()
 
             val event = eventSlot.captured
             assertThat(event.bookId).isEqualTo("$id")
             assertThat(event.timestamp).isEqualTo(fixedTimestamp)
         }
 
-        @Test fun `throws exception if it was not found in data store`() {
-            every { dataStore.findById(id) } returns null
+        @Test
+        fun `throws exception if it was not found in data store`() {
+            every { dataStore.findById(id) } returns Mono.empty()
             assertThrows(BookNotFoundException::class) {
-                cut.updateBook(id) { updatedBookRecord }
+                cut.updateBook(id) { updatedBookRecord }.block()
             }
         }
 
-        @Test fun `does not dispatch any events in case of an exception`() {
-            every { dataStore.createOrUpdate(any()) } throws RuntimeException()
+        @Test
+        fun `does not dispatch any events in case of an exception`() {
+            every { dataStore.createOrUpdate(any()) } returns Mono.error(RuntimeException())
             assertThrows(RuntimeException::class) {
-                cut.updateBook(id) { updatedBookRecord }
+                cut.updateBook(id) { updatedBookRecord }.block()
             }
             confirmVerified(eventDispatcher)
         }
 
     }
 
-    @Nested inner class `getting a book` {
+    @Nested
+    inner class `getting a book` {
 
         val id = BookId.generate()
         val bookRecord = BookRecord(id, Books.THE_DARK_TOWER_I)
 
-        @Test fun `returns it if it was found in data store`() {
-            every { dataStore.findById(id) } returns bookRecord
-            val gotBook = cut.getBook(id)
+        @Test
+        fun `returns it if it was found in data store`() {
+            every { dataStore.findById(id) } returns Mono.just(bookRecord)
+            val gotBook = cut.getBook(id).block()!!
             assertThat(gotBook).isEqualTo(bookRecord)
         }
 
-        @Test fun `throws exception if it was not found in data store`() {
-            every { dataStore.findById(id) } returns null
+        @Test
+        fun `throws exception if it was not found in data store`() {
+            every { dataStore.findById(id) } returns Mono.empty()
             assertThrows(BookNotFoundException::class) {
-                cut.getBook(id)
+                cut.getBook(id).block()!!
             }
         }
 
     }
 
-    @Nested inner class `getting all books` {
+    @Nested
+    inner class `getting all books` {
 
-        @Test fun `delegates directly to data store`() {
+        @Test
+        fun `delegates directly to data store`() {
             val bookRecord1 = BookRecord(BookId.generate(), Books.THE_DARK_TOWER_II)
             val bookRecord2 = BookRecord(BookId.generate(), Books.THE_DARK_TOWER_III)
-            every { dataStore.findAll() } returns listOf(bookRecord1, bookRecord2)
+            every { dataStore.findAll() } returns Flux.fromIterable(listOf(bookRecord1, bookRecord2))
 
-            val allBooks = cut.getAllBooks()
+            val allBooks = cut.getAllBooks().collectList().block()!!
 
             assertThat(allBooks).containsExactly(bookRecord1, bookRecord2)
         }
 
     }
 
-    @Nested inner class `removing a book` {
+    @Nested
+    inner class `removing a book` {
 
         val id = BookId.generate()
         val bookRecord = BookRecord(id, Books.THE_DARK_TOWER_IV)
 
-        @Test fun `deletes it from the data store if found`() {
-            every { dataStore.findById(id) } returns bookRecord
-            cut.removeBook(id)
+        @Test
+        fun `deletes it from the data store if found`() {
+            every { dataStore.findById(id) } returns Mono.just(bookRecord)
+            cut.removeBook(id).block()
             verify { dataStore.delete(bookRecord) }
         }
 
-        @Test fun `dispatches a BookRemoved event`() {
+        @Test
+        fun `dispatches a BookRemoved event`() {
             val eventSlot = slot<BookRemoved>()
-            every { eventDispatcher.dispatch(capture(eventSlot)) } returns Unit
-            every { dataStore.findById(id) } returns bookRecord
+            every { eventDispatcher.dispatch(capture(eventSlot)) } just Runs
+            every { dataStore.findById(id) } returns Mono.just(bookRecord)
 
-            cut.removeBook(id)
+            cut.removeBook(id).block()
 
             val event = eventSlot.captured
             assertThat(event.bookId).isEqualTo("$id")
             assertThat(event.timestamp).isEqualTo(fixedTimestamp)
         }
 
-        @Test fun `throws exception if it was not found in data store`() {
-            every { dataStore.findById(id) } returns null
+        @Test
+        fun `throws exception if it was not found in data store`() {
+            every { dataStore.findById(id) } returns Mono.empty()
             assertThrows(BookNotFoundException::class) {
-                cut.removeBook(id)
+                cut.removeBook(id).block()
             }
         }
 
-        @Test fun `does not dispatch any events in case of an exception`() {
-            every { dataStore.findById(id) } throws RuntimeException()
+        @Test
+        fun `does not dispatch any events in case of an exception`() {
+            every { dataStore.findById(id) } returns Mono.error(RuntimeException())
             assertThrows(RuntimeException::class) {
-                cut.removeBook(id)
+                cut.removeBook(id).block()
             }
             confirmVerified(eventDispatcher)
         }
 
     }
 
-    @Nested inner class `borrowing a book` {
+    @Nested
+    inner class `borrowing a book` {
 
         val id = BookId.generate()
         val availableBookRecord = BookRecord(id, Books.THE_DARK_TOWER_V)
         val borrowedBookRecord = availableBookRecord.borrow(Borrower("Someone"), OffsetDateTime.now())
 
-        @Test fun `changes its state and updates it in the data store`() {
-            every { dataStore.findById(id) } returns availableBookRecord
+        @Test
+        fun `changes its state and updates it in the data store`() {
+            every { dataStore.findById(id) } returns Mono.just(availableBookRecord)
 
-            val borrowedBook = cut.borrowBook(id, Borrower("Someone"))
+            val borrowedBook = cut.borrowBook(id, Borrower("Someone")).block()!!
 
             assertThat(borrowedBook.state).isInstanceOf(Borrowed::class.java)
             assertThat(borrowedBook).isEqualTo(borrowedBook)
         }
 
-        @Test fun `dispatches a BookBorrowed event`() {
+        @Test
+        fun `dispatches a BookBorrowed event`() {
             val eventSlot = slot<BookBorrowed>()
-            every { eventDispatcher.dispatch(capture(eventSlot)) } returns Unit
-            every { dataStore.findById(id) } returns availableBookRecord
+            every { eventDispatcher.dispatch(capture(eventSlot)) } just Runs
+            every { dataStore.findById(id) } returns Mono.just(availableBookRecord)
 
-            cut.borrowBook(id, Borrower("Someone"))
+            cut.borrowBook(id, Borrower("Someone")).block()
 
             val event = eventSlot.captured
             assertThat(event.bookId).isEqualTo("$id")
             assertThat(event.timestamp).isEqualTo(fixedTimestamp)
         }
 
-        @Test fun `throws exception if it was not found in data store`() {
-            every { dataStore.findById(id) } returns null
+        @Test
+        fun `throws exception if it was not found in data store`() {
+            every { dataStore.findById(id) } returns Mono.empty()
             assertThrows(BookNotFoundException::class) {
-                cut.borrowBook(id, Borrower("Someone"))
+                cut.borrowBook(id, Borrower("Someone")).block()
             }
         }
 
-        @Test fun `throws exception if it is already 'borrowed'`() {
-            every { dataStore.findById(id) } returns borrowedBookRecord
+        @Test
+        fun `throws exception if it is already 'borrowed'`() {
+            every { dataStore.findById(id) } returns Mono.just(borrowedBookRecord)
             assertThrows(BookAlreadyBorrowedException::class) {
-                cut.borrowBook(id, Borrower("Someone Else"))
+                cut.borrowBook(id, Borrower("Someone Else")).block()
             }
         }
 
-        @Test fun `does not dispatch any events in case of an exception`() {
-            every { dataStore.findById(id) } throws RuntimeException()
+        @Test
+        fun `does not dispatch any events in case of an exception`() {
+            every { dataStore.findById(id) } returns Mono.error(RuntimeException())
             assertThrows(RuntimeException::class) {
-                cut.borrowBook(id, Borrower("Someone Else"))
+                cut.borrowBook(id, Borrower("Someone Else")).block()
             }
             confirmVerified(eventDispatcher)
         }
 
     }
 
-    @Nested inner class `returning a book` {
+    @Nested
+    inner class `returning a book` {
 
         val id = BookId.generate()
         val availableBookRecord = BookRecord(id, Books.THE_DARK_TOWER_VI)
         val borrowedBookRecord = availableBookRecord.borrow(Borrower("Someone"), OffsetDateTime.now())
 
-        @Test fun `changes its state and updates it in the data store`() {
-            every { dataStore.findById(id) } returns borrowedBookRecord
+        @Test
+        fun `changes its state and updates it in the data store`() {
+            every { dataStore.findById(id) } returns Mono.just(borrowedBookRecord)
 
-            val result = cut.returnBook(id)
+            val result = cut.returnBook(id).block()!!
 
             assertThat(result.state).isEqualTo(Available)
             assertThat(result).isEqualTo(availableBookRecord)
         }
 
-        @Test fun `dispatches a BookReturned event`() {
+        @Test
+        fun `dispatches a BookReturned event`() {
             val eventSlot = slot<BookReturned>()
-            every { eventDispatcher.dispatch(capture(eventSlot)) } returns Unit
-            every { dataStore.findById(id) } returns borrowedBookRecord
+            every { eventDispatcher.dispatch(capture(eventSlot)) } just Runs
+            every { dataStore.findById(id) } returns Mono.just(borrowedBookRecord)
 
-            cut.returnBook(id)
+            cut.returnBook(id).block()
 
             val event = eventSlot.captured
             assertThat(event.bookId).isEqualTo("$id")
             assertThat(event.timestamp).isEqualTo(fixedTimestamp)
         }
 
-        @Test fun `throws exception if it was not found in data store`() {
-            every { dataStore.findById(id) } returns null
+        @Test
+        fun `throws exception if it was not found in data store`() {
+            every { dataStore.findById(id) } returns Mono.empty()
             assertThrows(BookNotFoundException::class) {
-                cut.returnBook(id)
+                cut.returnBook(id).block()
             }
         }
 
-        @Test fun `throws exception if it is already 'returned'`() {
-            every { dataStore.findById(id) } returns availableBookRecord
+        @Test
+        fun `throws exception if it is already 'returned'`() {
+            every { dataStore.findById(id) } returns Mono.just(availableBookRecord)
             assertThrows(BookAlreadyReturnedException::class) {
-                cut.returnBook(id)
+                cut.returnBook(id).block()
             }
         }
 
-        @Test fun `does not dispatch any events in case of an exception`() {
-            every { dataStore.findById(id) } throws RuntimeException()
+        @Test
+        fun `does not dispatch any events in case of an exception`() {
+            every { dataStore.findById(id) } returns Mono.error(RuntimeException())
             assertThrows(RuntimeException::class) {
-                cut.returnBook(id)
+                cut.returnBook(id).block()
             }
             confirmVerified(eventDispatcher)
         }

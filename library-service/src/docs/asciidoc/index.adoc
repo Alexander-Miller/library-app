@@ -54,7 +54,7 @@ further information.
 
 There are special headers which can be given as part of a request:
 
-- `X-Correlation-ID` - Override the correlation ID logged by the service for
+- `X-B3-TraceId` - Override the correlation ID logged by the service for
 this request. Used for tracing of requests over multiple services.
 
 == Errors

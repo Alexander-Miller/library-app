@@ -28,84 +28,101 @@ import java.time.ZoneOffset
 @ComponentScan("library.service.database")
 internal class MongoBookDataStoreIntTest {
 
-    @Autowired lateinit var repository: BookRepository
-    @Autowired lateinit var cut: MongoBookDataStore
+    @Autowired
+    lateinit var repository: BookRepository
 
-    @BeforeEach fun resetDatabase() = with(repository) { deleteAll() }
+    @Autowired
+    lateinit var cut: MongoBookDataStore
 
-    @Nested inner class `creating or updating book records` {
+    @BeforeEach
+    fun resetDatabase() {
+        with(repository) { deleteAll().block() }
+    }
 
-        @Test fun `non-existing book records are created`() {
+    @Nested
+    inner class `creating or updating book records` {
+
+        @Test
+        fun `non-existing book records are created`() {
             val bookId = BookId.generate()
             val inputRecord = BookRecord(bookId, Books.THE_DARK_TOWER_I)
-            val createdRecord = cut.createOrUpdate(inputRecord)
+            val createdRecord = cut.createOrUpdate(inputRecord).block()!!
 
             assertThat(createdRecord).isEqualTo(inputRecord)
-            assertThat(cut.findById(bookId)).isEqualTo(createdRecord)
+            assertThat(cut.findById(bookId).block()!!).isEqualTo(createdRecord)
         }
 
-        @Test fun `existing book records are updated`() {
+        @Test
+        fun `existing book records are updated`() {
             val bookId = BookId.generate()
             val inputRecord = BookRecord(bookId, Books.THE_DARK_TOWER_II)
-            val createdRecord = cut.createOrUpdate(inputRecord)
+            val createdRecord = cut.createOrUpdate(inputRecord).block()!!
 
             val borrowedBy = Borrower("Frodo")
             val borrowedOn = OffsetDateTime.now().withOffsetSameInstant(ZoneOffset.UTC)
             val modifiedRecord = BookRecord(bookId, Books.THE_LORD_OF_THE_RINGS_1, Borrowed(borrowedBy, borrowedOn))
 
-            val updatedRecord = cut.createOrUpdate(modifiedRecord)
+            val updatedRecord = cut.createOrUpdate(modifiedRecord).block()!!
 
             assertThat(updatedRecord).isEqualTo(modifiedRecord)
             assertThat(updatedRecord).isNotEqualTo(createdRecord)
-            assertThat(cut.findById(bookId)).isEqualTo(updatedRecord)
+            assertThat(cut.findById(bookId).block()!!).isEqualTo(updatedRecord)
         }
 
     }
 
-    @Nested inner class `looking up book records` {
+    @Nested
+    inner class `looking up book records` {
 
-        @Test fun `book records can be looked up by their ID`() {
+        @Test
+        fun `book records can be looked up by their ID`() {
             val bookRecord = create(Books.THE_DARK_TOWER_II)
-            assertThat(cut.findById(bookRecord.id)).isEqualTo(bookRecord)
+            assertThat(cut.findById(bookRecord.id).block()).isEqualTo(bookRecord)
         }
 
-        @Test fun `looking up book records by their ID might return null`() {
-            assertThat(cut.findById(BookId.generate())).isNull()
+        @Test
+        fun `looking up book records by their ID might return null`() {
+            assertThat(cut.findById(BookId.generate()).block()).isNull()
         }
 
-        @Test fun `all book records can be looked up at once`() {
+        @Test
+        fun `all book records can be looked up at once`() {
             val bookRecord1 = create(Books.THE_DARK_TOWER_IV)
             val bookRecord2 = create(Books.THE_DARK_TOWER_V)
             val bookRecord3 = create(Books.THE_DARK_TOWER_VI)
 
-            val allBooks = cut.findAll()
+            val allBooks = cut.findAll().collectList().block()!!
 
             assertThat(allBooks).containsOnly(bookRecord1, bookRecord2, bookRecord3)
         }
 
     }
 
-    @Nested inner class `checking existence of records by Id` {
+    @Nested
+    inner class `checking existence of records by Id` {
 
-        @Test fun `returns true for exiting records`() {
+        @Test
+        fun `returns true for exiting records`() {
             val bookRecord = create(Books.THE_DARK_TOWER_II)
-            assertThat(cut.existsById(bookRecord.id)).isTrue()
+            assertThat(cut.existsById(bookRecord.id).block()!!).isTrue()
         }
 
-        @Test fun `returns false for non-existing records`() {
-            assertThat(cut.existsById(BookId.generate())).isFalse()
+        @Test
+        fun `returns false for non-existing records`() {
+            assertThat(cut.existsById(BookId.generate()).block()!!).isFalse()
         }
 
     }
 
-    @Test fun `book records can be deleted`() {
+    @Test
+    fun `book records can be deleted`() {
         val bookRecord = create(Books.THE_DARK_TOWER_III)
-        cut.delete(bookRecord)
-        assertThat(cut.findById(bookRecord.id)).isNull()
+        cut.delete(bookRecord).block()
+        assertThat(cut.findById(bookRecord.id).block()).isNull()
     }
 
     fun create(book: Book): BookRecord {
-        return cut.createOrUpdate(BookRecord(BookId.generate(), book))
+        return cut.createOrUpdate(BookRecord(BookId.generate(), book)).block()!!
     }
 
 }

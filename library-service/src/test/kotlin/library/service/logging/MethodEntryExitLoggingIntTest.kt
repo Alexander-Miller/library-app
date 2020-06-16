@@ -19,33 +19,42 @@ internal class MethodEntryExitLoggingIntTest {
     @ComponentScan
     @EnableAspectJAutoProxy
     class TestConfiguration {
-        @Bean fun exampleClass() = ExampleClass()
-        @Bean fun annotatedExampleClass() = AnnotatedExampleClass()
+        @Bean
+        fun exampleClass() = ExampleClass()
+
+        @Bean
+        fun annotatedExampleClass() = AnnotatedExampleClass()
     }
 
-    @Autowired lateinit var example: ExampleClass
-    @Autowired lateinit var annotatedExample: AnnotatedExampleClass
+    @Autowired
+    lateinit var example: ExampleClass
+
+    @Autowired
+    lateinit var annotatedExample: AnnotatedExampleClass
 
     @RecordLoggers(LogMethodEntryAndExitAspect::class)
-    @Test fun `logging proxy is activated by annotation`(record: LogRecord) {
+    @Test
+    fun `logging proxy is activated by annotation`(record: LogRecord) {
         example.openPublicMethod()
         annotatedExample.openPublicMethod()
         assertThat(record.messages).hasSize(2)
     }
 
     @RecordLoggers(LogMethodEntryAndExitAspect::class)
-    @Test fun `open public methods are logged`(record: LogRecord) {
+    @Test
+    fun `open public methods are logged`(record: LogRecord) {
         annotatedExample.openPublicMethod()
         val className = AnnotatedExampleClass::class.java.name
         val expectedMessages = arrayOf(
-                "executing method: void $className.openPublicMethod()",
-                "successfully executed method: void $className.openPublicMethod()"
+            "executing method: void $className.openPublicMethod()",
+            "successfully executed method: void $className.openPublicMethod()"
         )
         assertThat(record.messages).containsExactly(*expectedMessages)
     }
 
     @RecordLoggers(LogMethodEntryAndExitAspect::class)
-    @Test fun `only open public methods are logged`(record: LogRecord) {
+    @Test
+    fun `only open public methods are logged`(record: LogRecord) {
         annotatedExample.closedPublicMethod()
         annotatedExample.internalMethod()
         assertThat(record.messages).hasSize(0)

@@ -2,6 +2,8 @@ package library.service.business.books
 
 import library.service.business.books.domain.BookRecord
 import library.service.business.books.domain.types.BookId
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 import java.util.*
 
 /**
@@ -20,14 +22,14 @@ interface BookDataStore {
      * @param bookRecord the [BookRecord] to create or update
      * @return the created / updated [BookRecord]
      */
-    fun createOrUpdate(bookRecord: BookRecord): BookRecord
+    fun createOrUpdate(bookRecord: BookRecord): Mono<BookRecord>
 
     /**
      * Deletes the given [BookRecord] from the data store.
      *
      * @param bookRecord the [BookRecord] to delete
      */
-    fun delete(bookRecord: BookRecord)
+    fun delete(bookRecord: BookRecord): Mono<Void>
 
     /**
      * Tries to find a [BookRecord] by its unique ID.
@@ -35,7 +37,7 @@ interface BookDataStore {
      * @param id the book's [UUID]
      * @return the found [BookRecord] - might be `null`!
      */
-    fun findById(id: BookId): BookRecord?
+    fun findById(id: BookId): Mono<BookRecord>
 
     /**
      * Finds all [BookRecord] currently present in the data store and returns
@@ -43,13 +45,13 @@ interface BookDataStore {
      *
      * @return the found [BookRecord] as a list
      */
-    fun findAll(): List<BookRecord>
+    fun findAll(): Flux<BookRecord>
 
     /**
      * Checks if there exists a [BookRecord] for the given [BookId].
      *
      * @return `true` if a record exists, otherwise `false`
      */
-    fun existsById(bookId: BookId): Boolean
 
+    fun existsById(bookId: BookId): Mono<Boolean>
 }

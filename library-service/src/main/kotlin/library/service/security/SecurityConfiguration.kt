@@ -1,108 +1,124 @@
 package library.service.security
 
-import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest.to
-import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest.toAnyEndpoint
+import library.service.security.Roles.ACTUATOR
+import library.service.security.Roles.CURATOR
+import library.service.security.Roles.USER
+import library.service.security.UserSettings.UserCredentials
+import org.springframework.boot.actuate.autoconfigure.security.reactive.EndpointRequest.to
+import org.springframework.boot.actuate.autoconfigure.security.reactive.EndpointRequest.toAnyEndpoint
 import org.springframework.boot.actuate.health.HealthEndpoint
 import org.springframework.boot.actuate.info.InfoEndpoint
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.http.HttpMethod
+import org.springframework.http.HttpMethod.GET
 import org.springframework.security.authentication.AuthenticationManager
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder
-import org.springframework.security.config.annotation.authentication.configurers.provisioning.InMemoryUserDetailsManagerConfigurer
+import org.springframework.security.authentication.ReactiveAuthenticationManager
+import org.springframework.security.authentication.UserDetailsRepositoryReactiveAuthenticationManager
 import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity
-import org.springframework.security.config.annotation.web.builders.HttpSecurity
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter
-import org.springframework.security.config.annotation.web.configurers.ExpressionUrlAuthorizationConfigurer
-import org.springframework.security.config.http.SessionCreationPolicy
+import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity
+import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity
+import org.springframework.security.config.web.server.ServerHttpSecurity
+import org.springframework.security.core.userdetails.MapReactiveUserDetailsService
+import org.springframework.security.core.userdetails.ReactiveUserDetailsService
 import org.springframework.security.core.userdetails.User
+import org.springframework.security.core.userdetails.UserDetailsService
 import org.springframework.security.crypto.factory.PasswordEncoderFactories
+import org.springframework.security.web.server.SecurityWebFilterChain
+import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache
 import org.springframework.web.cors.CorsConfiguration
-import org.springframework.web.cors.CorsConfigurationSource
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource
+import org.springframework.web.cors.reactive.CorsConfigurationSource
+import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource
 
 @Configuration
-@EnableWebSecurity
+@EnableWebFluxSecurity
 class SecurityConfiguration {
 
     @Configuration
     @ConditionalOnProperty("application.secured", havingValue = "false", matchIfMissing = false)
-    class UnsecuredConfiguration : WebSecurityConfigurerAdapter() {
-
-        override fun configure(http: HttpSecurity): Unit = with(http) {
-            csrf().disable()
-            sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-            authorizeRequests().anyRequest().permitAll()
+    class UnsecuredConfiguration {
+        @Bean
+        fun unsecuredWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+            return http.csrf().disable()
+                .authorizeExchange().anyExchange().permitAll()
+                .and()
+                .build()
         }
-
     }
 
     @Configuration
     @ConditionalOnProperty("application.secured", havingValue = "true", matchIfMissing = true)
-    @EnableGlobalMethodSecurity(prePostEnabled = true)
+    @EnableReactiveMethodSecurity
     @EnableConfigurationProperties(UserSettings::class, CorsSettings::class)
     class SecuredConfiguration(
-            private val userSettings: UserSettings,
-            private val corsSettings: CorsSettings
-    ) : WebSecurityConfigurerAdapter() {
+        private val userSettings: UserSettings,
+        private val corsSettings: CorsSettings
+    ) {
 
         private val infoEndpoint = InfoEndpoint::class.java
         private val healthEndpoint = HealthEndpoint::class.java
+        private val encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder()
 
-        private val encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
-
-        override fun configure(http: HttpSecurity): Unit = with(http) {
-            csrf().disable()
-            cors()
-            httpBasic()
-            sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-            authorizeRequests { requests ->
-                requests.antMatchers(HttpMethod.GET, "/", "/help", "/docs", "/docs/**").permitAll()
-                requests.requestMatchers(to(infoEndpoint, healthEndpoint)).permitAll()
-                requests.requestMatchers(toAnyEndpoint()).hasRole(Roles.ACTUATOR)
-                requests.anyRequest().fullyAuthenticated()
-            }
-        }
-
-        override fun configure(auth: AuthenticationManagerBuilder): Unit = with(auth) {
-            inMemoryAuthentication {
-                withUser(userSettings.admin.toUser(Roles.USER, Roles.CURATOR, Roles.ACTUATOR))
-                withUser(userSettings.curator.toUser(Roles.USER, Roles.CURATOR))
-                withUser(userSettings.user.toUser(Roles.USER))
-            }
-        }
-
-        @Bean override fun authenticationManagerBean(): AuthenticationManager = super.authenticationManagerBean()
-
-        private fun UserSettings.UserCredentials.toUser(vararg roles: String) = User
-                .withUsername(username)
-                .password(encoder.encode(password))
-                .roles(*roles)
+        @Bean
+        fun securedWebFilterChain(
+            http: ServerHttpSecurity,
+            userSettings: UserSettings,
+            corsSettings: CorsSettings,
+            authManager: ReactiveAuthenticationManager
+        ): SecurityWebFilterChain {
+            return http.csrf().disable()
+                .cors()
+                .and()
+                .httpBasic()
+                .authenticationManager(authManager)
+                .and()
+                .requestCache().requestCache(NoOpServerRequestCache.getInstance())
+                .and()
+                .formLogin().disable()
+                .authorizeExchange { spec ->
+                    spec.pathMatchers(GET, "/", "/help", "/docs", "/docs/**").permitAll()
+                    spec.matchers(to(infoEndpoint, healthEndpoint)).permitAll()
+                    spec.matchers(toAnyEndpoint()).hasRole(ACTUATOR)
+                    spec.anyExchange().authenticated()
+                }
                 .build()
+        }
 
-        private fun HttpSecurity.authorizeRequests(
-                body: ExpressionUrlAuthorizationConfigurer<*>.ExpressionInterceptUrlRegistry.() -> Unit
-        ) = body(this.authorizeRequests())
+        @Bean
+        fun userDetailsService(): MapReactiveUserDetailsService {
+            return MapReactiveUserDetailsService(
+                userSettings.admin.toUser(USER, CURATOR, ACTUATOR),
+                userSettings.curator.toUser(USER, CURATOR),
+                userSettings.user.toUser(USER)
+            )
+        }
 
-        private fun AuthenticationManagerBuilder.inMemoryAuthentication(
-                body: InMemoryUserDetailsManagerConfigurer<*>.() -> Unit
-        ) = body(this.inMemoryAuthentication())
+        @Bean
+        fun authManager(userService: ReactiveUserDetailsService): ReactiveAuthenticationManager {
+            return UserDetailsRepositoryReactiveAuthenticationManager(userService)
+        }
+
+
+        private fun UserCredentials.toUser(
+            vararg roles: String
+        ) = User.withUsername(username)
+            .password(encoder.encode(password))
+            .roles(*roles)
+            .build()
 
         @Bean
         fun corsConfigurationSource(): CorsConfigurationSource {
-            val configuration = CorsConfiguration()
-            configuration.allowedOrigins = corsSettings.origins
-            configuration.allowedMethods = corsSettings.methods
-            configuration.allowedHeaders = mutableListOf("*")
-            configuration.allowCredentials = true
-            val source = UrlBasedCorsConfigurationSource()
-            source.registerCorsConfiguration("/**", configuration)
-            return source
+            val configuration = CorsConfiguration().apply {
+                allowedOrigins = corsSettings.origins
+                allowedMethods = corsSettings.methods
+                allowedHeaders = mutableListOf("*")
+                allowCredentials = true
+            }
+            return UrlBasedCorsConfigurationSource().apply {
+                registerCorsConfiguration("/**", configuration)
+            }
         }
 
     }
-
 }

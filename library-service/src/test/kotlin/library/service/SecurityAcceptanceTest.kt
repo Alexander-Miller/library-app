@@ -1,5 +1,7 @@
 package library.service
 
+import brave.Tracer
+import io.mockk.mockk
 import io.restassured.RestAssured
 import io.restassured.RestAssured.given
 import io.restassured.response.Response
@@ -10,6 +12,7 @@ import library.service.business.books.domain.types.BookId
 import library.service.business.books.domain.types.Borrower
 import library.service.database.BookRepository
 import library.service.security.Authorizations
+import library.service.security.SecurityConfiguration
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
@@ -25,6 +28,9 @@ import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDO
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.web.server.LocalServerPort
 import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
+import org.springframework.context.annotation.Primary
+import reactor.core.publisher.Mono
 import utils.Books
 import utils.classification.AcceptanceTest
 import utils.executeAsUserWithRole
@@ -34,25 +40,36 @@ import utils.extensions.RabbitMqExtension
 @AcceptanceTest
 @ExtendWith(MongoDbExtension::class, RabbitMqExtension::class)
 @SpringBootTest(
-        webEnvironment = RANDOM_PORT,
-        properties = [
-            "spring.data.mongodb.port=\${MONGODB_PORT}",
-            "spring.rabbitmq.port=\${RABBITMQ_PORT}"
-        ]
+    webEnvironment = RANDOM_PORT,
+    properties = [
+        "spring.data.mongodb.port=\${MONGODB_PORT}",
+        "spring.rabbitmq.port=\${RABBITMQ_PORT}"
+    ]
 )
 internal class SecurityAcceptanceTest {
 
     @TestConfiguration
+    @Import(SecurityConfiguration::class)
     class AdditionalBeans {
         // required for the 'httptrace' actuator endpoint
         @Bean
         fun httpTraceRepository() = InMemoryHttpTraceRepository()
+
+        // default bean needs to be overridden because for the test setup that
+        // is directly using the bookCollection no span exists (and manual creation
+        // of one does not work)
+        @Primary
+        @Bean
+        fun tracer(): Tracer = mockk(relaxed = true)
     }
 
     val book = Books.THE_MARTIAN
 
-    @Autowired lateinit var bookRepository: BookRepository
-    @Autowired lateinit var bookCollection: BookCollection
+    @Autowired
+    lateinit var bookRepository: BookRepository
+
+    @Autowired
+    lateinit var bookCollection: BookCollection
 
     @LocalServerPort
     fun setupRestAssured(port: Int) {
@@ -60,47 +77,58 @@ internal class SecurityAcceptanceTest {
         RestAssured.port = port
     }
 
-    @AfterEach fun deleteAllBooks() {
-        bookRepository.deleteAll()
+    @AfterEach
+    fun deleteAllBooks() {
+        bookRepository.deleteAll().block()
     }
 
-    @Nested inner class `actuator endpoints` {
+    @Nested
+    inner class `actuator endpoints` {
 
-        @Test fun `actuator info endpoint can be accessed by anyone`() {
+        @Test
+        fun `actuator info endpoint can be accessed by anyone`() {
             given { auth().none() } `when` { get("/actuator/info") } then { statusCode(200) }
         }
 
-        @Test fun `actuator health endpoint can be accessed by anyone`() {
+        @Test
+        fun `actuator health endpoint can be accessed by anyone`() {
             given { auth().none() } `when` { get("/actuator/health") } then { statusCode(200) }
         }
 
-        @ValueSource(strings = ["beans", "conditions", "configprops", "env", "loggers",
-            "metrics", "scheduledtasks", "httptrace", "mappings"])
-        @ParameterizedTest fun `any other actuator endpoint can only be accessed by an admin`(endpoint: String) {
+        @ValueSource(
+            strings = ["beans", "conditions", "configprops", "env", "loggers",
+                "metrics", "scheduledtasks", "httptrace", "mappings"]
+        )
+        @ParameterizedTest
+        fun `any other actuator endpoint can only be accessed by an admin`(endpoint: String) {
             given { auth().none() }
-                    .`when` { get("/actuator/$endpoint") }
-                    .then { statusCode(401) }
+                .`when` { get("/actuator/$endpoint") }
+                .then { statusCode(401) }
             given { auth().basic("user", "user") }
-                    .`when` { get("/actuator/$endpoint") }
-                    .then { statusCode(403) }
+                .`when` { get("/actuator/$endpoint") }
+                .then { statusCode(403) }
             given { auth().basic("curator", "curator") }
-                    .`when` { get("/actuator/$endpoint") }
-                    .then { statusCode(403) }
+                .`when` { get("/actuator/$endpoint") }
+                .then { statusCode(403) }
             given { auth().basic("admin", "admin") }
-                    .`when` { get("/actuator/$endpoint") }
-                    .then { statusCode(200) }
+                .`when` { get("/actuator/$endpoint") }
+                .then { statusCode(200) }
         }
 
     }
 
-    @Nested inner class `api endpoints` {
+    @Nested
+    inner class `api endpoints` {
 
-        @ValueSource(strings = [
-            "/api/books", "/api/books/some-id",
-            "/api/books/some-id/borrow", "/api/books/some-id/return",
-            "/api/books/some-id/title", "/api/books/some-id/authors", "/api/books/some-id/numberOfPages"
-        ])
-        @ParameterizedTest fun `API endpoints cant be accessed anonymously`(endpoint: String) {
+        @ValueSource(
+            strings = [
+                "/api/books", "/api/books/some-id",
+                "/api/books/some-id/borrow", "/api/books/some-id/return",
+                "/api/books/some-id/title", "/api/books/some-id/authors", "/api/books/some-id/numberOfPages"
+            ]
+        )
+        @ParameterizedTest
+        fun `API endpoints cant be accessed anonymously`(endpoint: String) {
             given { auth().none() } `when` { get(endpoint) } then { statusCode(401) }
             given { auth().none() } `when` { post(endpoint) } then { statusCode(401) }
             given { auth().none() } `when` { put(endpoint) } then { statusCode(401) }
@@ -121,11 +149,13 @@ internal class SecurityAcceptanceTest {
             } `when` { post("/api/books") } then { statusCode(expectedStatus) }
         }
 
-        @Nested inner class `book properties can only be updated by curators and admins` {
+        @Nested
+        inner class `book properties can only be updated by curators and admins` {
 
             lateinit var bookId: BookId
 
-            @BeforeEach fun addBook() {
+            @BeforeEach
+            fun addBook() {
                 bookId = asCurator { bookCollection.addBook(book) }.id
             }
 
@@ -184,7 +214,9 @@ internal class SecurityAcceptanceTest {
         @ParameterizedTest(name = "deleting a book as a {0} will result in a {1} response")
         fun `books can only be deleted by curators and admins`(user: String, expectedStatus: Int) {
             val bookId = asCurator { bookCollection.addBook(book) }.id
-            given { auth().basic(user, user) } `when` { delete("/api/books/$bookId") } then { statusCode(expectedStatus) }
+            given {
+                auth().basic(user, user)
+            } `when` { delete("/api/books/$bookId") } then { statusCode(expectedStatus) }
         }
 
         @CsvSource("user, 200", "curator, 200", "admin, 200")
@@ -204,7 +236,9 @@ internal class SecurityAcceptanceTest {
         fun `any user can return books`(user: String, expectedStatus: Int) {
             val bookId = asCurator { bookCollection.addBook(book) }.id
             asUser { bookCollection.borrowBook(bookId, Borrower("Rob Stark")) }
-            given { auth().basic(user, user) } `when` { post("/api/books/$bookId/return") } then { statusCode(expectedStatus) }
+            given { auth().basic(user, user) } `when` { post("/api/books/$bookId/return") } then {
+                statusCode(expectedStatus)
+            }
         }
 
         @CsvSource("user, 200", "curator, 200", "admin, 200")
@@ -223,11 +257,14 @@ internal class SecurityAcceptanceTest {
         return body(this.`when`())
     }
 
-    private infix fun Response.`then`(body: ValidatableResponse.() -> ValidatableResponse): ValidatableResponse {
+    private infix fun Response.then(body: ValidatableResponse.() -> ValidatableResponse): ValidatableResponse {
         return body(this.then())
     }
 
-    private fun <T : Any> asUser(body: () -> T): T = executeAsUserWithRole(role = Authorizations.USER_ROLE, body = body)
-    private fun <T : Any> asCurator(body: () -> T): T = executeAsUserWithRole(role = Authorizations.CURATOR_ROLE, body = body)
+    private fun <T : Any> asUser(body: () -> Mono<T>): T =
+        executeAsUserWithRole(role = Authorizations.USER_ROLE, body = body)
+
+    private fun <T : Any> asCurator(body: () -> Mono<T>): T =
+        executeAsUserWithRole(role = Authorizations.CURATOR_ROLE, body = body)
 
 }

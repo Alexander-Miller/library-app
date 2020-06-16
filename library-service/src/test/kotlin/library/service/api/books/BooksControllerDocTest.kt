@@ -1,5 +1,7 @@
 package library.service.api.books
 
+import brave.Tracer
+import brave.Tracing
 import io.mockk.every
 import io.mockk.mockk
 import library.service.business.books.BookCollection
@@ -11,18 +13,24 @@ import library.service.business.books.domain.types.Borrower
 import library.service.business.books.exceptions.BookAlreadyBorrowedException
 import library.service.business.books.exceptions.BookAlreadyReturnedException
 import library.service.business.books.exceptions.BookNotFoundException
-import library.service.correlation.CorrelationIdHolder
+import library.service.security.SecurityConfiguration
 import library.service.security.UserContext
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.restdocs.AutoConfigureRestDocs
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
+import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
-import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.context.annotation.Import
+import org.springframework.hateoas.MediaTypes.HAL_JSON
+import org.springframework.http.HttpStatus.CONFLICT
+import org.springframework.http.MediaType.APPLICATION_JSON_VALUE
+import org.springframework.restdocs.RestDocumentationExtension
+import org.springframework.test.web.reactive.server.WebTestClient
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 import utils.Books
 import utils.ResetMocksAfterEachTest
 import utils.classification.IntegrationTest
@@ -32,261 +40,366 @@ import java.time.OffsetDateTime
 
 @IntegrationTest
 @ResetMocksAfterEachTest
-@WebMvcTest(BooksController::class)
+@WebFluxTest(BooksController::class)
 @AutoConfigureRestDocs("build/generated-snippets/books")
 internal class BooksControllerDocTest(
     @Autowired val bookCollection: BookCollection,
-    @Autowired val mvc: MockMvc
+    @Autowired val testClient: WebTestClient,
+    @Autowired val userContext: UserContext
 ) {
 
     @TestConfiguration
+    @Import(SecurityConfiguration::class)
     class AdditionalBeans {
-        @Bean fun correlationIdHolder() = CorrelationIdHolder()
-        @Bean fun bookResourceAssembler() = BookResourceAssembler(UserContext())
-        @Bean fun bookCollection(): BookCollection = mockk()
+        @Bean
+        fun tracer(): Tracer = Tracing.newBuilder().build().tracer()
+
+        @Bean
+        fun userContext() = mockk<UserContext>()
+
+        @Bean
+        fun bookResourceAssembler(userContext: UserContext) = BookResourceAssembler(userContext)
+
+        @Bean
+        fun bookCollection(): BookCollection = mockk()
+    }
+
+    @BeforeEach
+    fun setupMocks() {
+        every { userContext.isCurator() } returns Mono.just(true)
     }
 
     // POST on /api/books
 
-    @Test fun `post book - created`() {
+    @Test
+    fun `post book - created`() {
         val createdBook = availableBook()
-        every { bookCollection.addBook(any()) } returns createdBook
-        val request = post("/api/books")
-            .contentType("application/json")
-            .content(
-                """
+        every { bookCollection.addBook(any()) } returns Mono.just(createdBook)
+        val body = """
                     {
                         "isbn": "${createdBook.book.isbn}",
                         "title": "${createdBook.book.title}"
                     }
                 """
-            )
-        mvc.perform(request)
-            .andExpect(status().isCreated)
-            .andExpect(content().contentType("application/hal+json"))
-            .andDo(document("postBook-created"))
+
+        testClient.post()
+            .uri("/api/books")
+            .header("Content-Type", APPLICATION_JSON_VALUE)
+            .body(Mono.just(body), String::class.java)
+            .exchange()
+            .expectStatus().isCreated
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .consumeWith(document("postBook-created"))
     }
 
-    @Test fun `post book - bad request`() {
-        val request = post("/api/books")
-            .contentType("application/json")
-            .content(""" {} """)
-        mvc.perform(request)
-            .andExpect(status().isBadRequest)
-            .andExpect(content().contentType("application/json"))
-            .andDo(document("error-example"))
+    @Test
+    fun `post book - bad request`() {
+        testClient.post()
+            .uri("/api/books")
+            .header("Content-Type", APPLICATION_JSON_VALUE)
+            .body(Mono.just(""" { } """), String::class.java)
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectHeader().contentType(APPLICATION_JSON_VALUE)
+            .expectBody()
+            .consumeWith(document("error-example"))
     }
 
     // PUT on /api/books/{bookId}/authors
 
-    @Test fun `put book authors - ok`() {
+    @Test
+    fun `put book authors - ok`() {
         val book = Books.CLEAN_CODE
         val bookRecord = availableBook(book = book)
 
-        every { bookCollection.updateBook(any(), any()) } returns bookRecord
+        every { bookCollection.updateBook(any(), any()) } returns Mono.just(bookRecord)
 
         val authorsValue = book.authors.joinToString(prefix = "\"", separator = "\", \"", postfix = "\"")
-        val request = put("/api/books/3c15641e-2598-41f5-9097-b37e2d768be5/authors")
-            .contentType("application/json")
-            .content("""{ "authors": [$authorsValue] }""")
-        mvc.perform(request)
-            .andExpect(status().isOk)
-            .andExpect(content().contentType("application/hal+json"))
-            .andDo(document("putBookAuthors-ok"))
+
+        testClient.put()
+            .uri("/api/books/3c15641e-2598-41f5-9097-b37e2d768be5/authors")
+            .header("Content-Type", APPLICATION_JSON_VALUE)
+            .body(Mono.just("""{ "authors": [$authorsValue] }"""), String::class.java)
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .consumeWith(document("putBookAuthors-ok"))
     }
 
     // DELETE on /api/books/{bookId}/authors
 
-    @Test fun `delete book authors - ok`() {
+    @Test
+    fun `delete book authors - ok`() {
         val book = Books.CLEAN_CODE.copy(authors = emptyList())
         val bookRecord = availableBook(book = book)
 
-        every { bookCollection.updateBook(any(), any()) } returns bookRecord
+        every { bookCollection.updateBook(any(), any()) } returns Mono.just(bookRecord)
 
-        mvc.perform(delete("/api/books/3c15641e-2598-41f5-9097-b37e2d768be5/authors"))
-            .andExpect(status().isOk)
-            .andExpect(content().contentType("application/hal+json"))
-            .andDo(document("deleteBookAuthors-ok"))
+        testClient.delete()
+            .uri("/api/books/3c15641e-2598-41f5-9097-b37e2d768be5/authors")
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .consumeWith(document("deleteBookAuthors-ok"))
     }
 
     // PUT on /api/books/{bookId}/numberOfPages
 
-    @Test fun `put book number of pages - ok`() {
+    @Test
+    fun `put book number of pages - ok`() {
         val book = Books.CLEAN_CODE
         val bookRecord = availableBook(book = book)
 
-        every { bookCollection.updateBook(any(), any()) } returns bookRecord
+        every { bookCollection.updateBook(any(), any()) } returns Mono.just(bookRecord)
 
         val numberOfPages = book.numberOfPages
-        val request = put("/api/books/3c15641e-2598-41f5-9097-b37e2d768be5/numberOfPages")
-            .contentType("application/json")
-            .content("""{ "numberOfPages": $numberOfPages }""")
-        mvc.perform(request)
-            .andExpect(status().isOk)
-            .andExpect(content().contentType("application/hal+json"))
-            .andDo(document("putBookNumberOfPages-ok"))
+
+        testClient.put()
+            .uri("/api/books/3c15641e-2598-41f5-9097-b37e2d768be5/numberOfPages")
+            .header("Content-Type", APPLICATION_JSON_VALUE)
+            .body(Mono.just("""{ "numberOfPages": $numberOfPages }"""), String::class.java)
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .consumeWith(document("putBookNumberOfPages-ok"))
     }
 
     // DELETE on /api/books/{bookId}/numberOfPages
 
-    @Test fun `delete book number of pages - ok`() {
+    @Test
+    fun `delete book number of pages - ok`() {
         val book = Books.CLEAN_CODE.copy(numberOfPages = null)
         val bookRecord = availableBook(book = book)
 
-        every { bookCollection.updateBook(any(), any()) } returns bookRecord
+        every { bookCollection.updateBook(any(), any()) } returns Mono.just(bookRecord)
 
-        mvc.perform(delete("/api/books/3c15641e-2598-41f5-9097-b37e2d768be5/numberOfPages"))
-            .andExpect(status().isOk)
-            .andExpect(content().contentType("application/hal+json"))
-            .andDo(document("deleteBookNumberOfPages-ok"))
+        testClient.delete()
+            .uri("/api/books/3c15641e-2598-41f5-9097-b37e2d768be5/numberOfPages")
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .consumeWith(document("deleteBookNumberOfPages-ok"))
     }
 
     // PUT on /api/books/{bookId}/title
 
-    @Test fun `put book title - ok`() {
+    @Test
+    fun `put book title - ok`() {
         val book = Books.CLEAN_CODE
         val bookRecord = availableBook(book = book)
 
-        every { bookCollection.updateBook(any(), any()) } returns bookRecord
+        every { bookCollection.updateBook(any(), any()) } returns Mono.just(bookRecord)
 
         val title = book.title
-        val request = put("/api/books/3c15641e-2598-41f5-9097-b37e2d768be5/title")
-            .contentType("application/json")
-            .content("""{ "title": "$title" }""")
-        mvc.perform(request)
-            .andExpect(status().isOk)
-            .andExpect(content().contentType("application/hal+json"))
-            .andDo(document("putBookTitle-ok"))
+
+        testClient.put()
+            .uri("/api/books/3c15641e-2598-41f5-9097-b37e2d768be5/title")
+            .header("Content-Type", APPLICATION_JSON_VALUE)
+            .body(Mono.just("""{ "title": "$title" }"""), String::class.java)
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .consumeWith(document("putBookTitle-ok"))
     }
 
     // GET on /api/books
 
-    @Test fun `getting all books - 0 books`() {
-        every { bookCollection.getAllBooks() } returns emptyList()
-        mvc.perform(get("/api/books"))
-            .andExpect(status().isOk)
-            .andDo(document("getAllBooks-0Books"))
+    @Test
+    fun `getting all books - 0 books`() {
+        every { bookCollection.getAllBooks() } returns Flux.empty()
+        testClient.get()
+            .uri("/api/books")
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .consumeWith(document("getAllBooks-0Books"))
     }
 
-    @Test fun `getting all books - 2 books`() {
-        every { bookCollection.getAllBooks() } returns listOf(availableBook(), borrowedBook())
-        mvc.perform(get("/api/books"))
-            .andExpect(status().isOk)
-            .andDo(document("getAllBooks-2Books"))
+    @Test
+    fun `getting all books - 2 books`() {
+        every { bookCollection.getAllBooks() } returns Flux.fromIterable(listOf(availableBook(), borrowedBook()))
+        testClient.get()
+            .uri("/api/books")
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .consumeWith(document("getAllBooks-2Books"))
     }
 
     // GET on /api/books/{id}
 
-    @Test fun `getting book by ID - found available`() {
+    @Test
+    fun `getting book by ID - found available`() {
         val book = availableBook()
-        every { bookCollection.getBook(book.id) } returns book
-        mvc.perform(get("/api/books/${book.id}"))
-            .andExpect(status().isOk)
-            .andDo(document("getBookById-foundAvailable"))
+        every { bookCollection.getBook(book.id) } returns Mono.just(book)
+        testClient.get()
+            .uri("/api/books/${book.id}")
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .consumeWith(document("getBookById-foundAvailable"))
     }
 
-    @Test fun `getting book by ID - found borrowed`() {
+    @Test
+    fun `getting book by ID - found borrowed`() {
         val book = borrowedBook()
-        every { bookCollection.getBook(book.id) } returns book
-        mvc.perform(get("/api/books/${book.id}"))
-            .andExpect(status().isOk)
-            .andDo(document("getBookById-foundBorrowed"))
+        every { bookCollection.getBook(book.id) } returns Mono.just(book)
+        testClient.get()
+            .uri("/api/books/${book.id}")
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .consumeWith(document("getBookById-foundBorrowed"))
     }
 
-    @Test fun `getting book by ID - not found`() {
+    @Test
+    fun `getting book by ID - not found`() {
         val id = BookId.generate()
-        every { bookCollection.getBook(id) } throws BookNotFoundException(id)
-        mvc.perform(get("/api/books/$id"))
-            .andExpect(status().isNotFound)
-            .andDo(document("getBookById-notFound"))
+        every { bookCollection.getBook(id) } returns Mono.error { BookNotFoundException(id) }
+
+        testClient.get()
+            .uri("/api/books/$id")
+            .exchange()
+            .expectStatus().isNotFound
+            .expectHeader().contentType(APPLICATION_JSON_VALUE)
+            .expectBody()
+            .consumeWith(document("getBookById-notFound"))
     }
 
     // DELETE on /api/books/{id}
 
-    @Test fun `deleting book by ID - found`() {
+    @Test
+    fun `deleting book by ID - found`() {
         val id = BookId.generate()
-        every { bookCollection.removeBook(id) } returns Unit
-        mvc.perform(delete("/api/books/$id"))
-            .andExpect(status().isNoContent)
-            .andDo(document("deleteBookById-found"))
+        every { bookCollection.removeBook(id) } returns Mono.empty()
+        testClient.delete()
+            .uri("/api/books/$id")
+            .exchange()
+            .expectStatus().isNoContent
+            .expectBody()
+            .consumeWith(document("deleteBookById-found"))
     }
 
-    @Test fun `deleting book by ID - not found`() {
+    @Test
+    fun `deleting book by ID - not found`() {
         val id = BookId.generate()
-        every { bookCollection.removeBook(id) } throws BookNotFoundException(id)
-        mvc.perform(delete("/api/books/$id"))
-            .andExpect(status().isNotFound)
-            .andDo(document("deleteBookById-notFound"))
+        every { bookCollection.removeBook(id) } returns Mono.error(BookNotFoundException(id))
+        testClient.delete()
+            .uri("/api/books/$id")
+            .exchange()
+            .expectStatus().isNotFound
+            .expectHeader().contentType(APPLICATION_JSON_VALUE)
+            .expectBody()
+            .consumeWith(document("deleteBookById-notFound"))
     }
 
     // POST on /api/books/{id}/borrow
 
-    @Test fun `borrowing book by ID - found available`() {
+    @Test
+    fun `borrowing book by ID - found available`() {
         val book = borrowedBook()
         val borrower = (book.state as Borrowed).by
-        every { bookCollection.borrowBook(book.id, borrower) } returns book
+        every { bookCollection.borrowBook(book.id, borrower) } returns Mono.just(book)
 
-        val request = post("/api/books/${book.id}/borrow")
-            .contentType("application/json")
-            .content(""" { "borrower": "$borrower" } """)
-        mvc.perform(request)
-            .andExpect(status().isOk)
-            .andDo(document("borrowBookById-foundAvailable"))
+        testClient.post()
+            .uri("/api/books/${book.id}/borrow")
+            .header("Content-Type", APPLICATION_JSON_VALUE)
+            .body(Mono.just(""" { "borrower": "$borrower" } """), String::class.java)
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .consumeWith(document("borrowBookById-foundAvailable"))
     }
 
-    @Test fun `borrowing book by ID - found already borrowed`() {
+    @Test
+    fun `borrowing book by ID - found already borrowed`() {
         val id = BookId.generate()
         val borrower = borrower()
-        every { bookCollection.borrowBook(id, borrower) } throws BookAlreadyBorrowedException(id)
+        every {
+            bookCollection.borrowBook(id, borrower)
+        } returns Mono.error(BookAlreadyBorrowedException(id))
 
-        val request = post("/api/books/$id/borrow")
-            .contentType("application/json")
-            .content(""" { "borrower": "$borrower" } """)
-        mvc.perform(request)
-            .andExpect(status().isConflict)
-            .andDo(document("borrowBookById-foundAlreadyBorrowed"))
+        testClient.post()
+            .uri("/api/books/$id/borrow")
+            .header("Content-Type", APPLICATION_JSON_VALUE)
+            .body(Mono.just(""" { "borrower": "$borrower" } """), String::class.java)
+            .exchange()
+            .expectStatus().isEqualTo(CONFLICT)
+            .expectBody()
+            .consumeWith(document("borrowBookById-foundAlreadyBorrowed"))
     }
 
-    @Test fun `borrowing book by ID - not found`() {
+    @Test
+    fun `borrowing book by ID - not found`() {
         val id = BookId.generate()
         val borrower = borrower()
-        every { bookCollection.borrowBook(id, borrower) } throws BookNotFoundException(id)
+        every {
+            bookCollection.borrowBook(id, borrower)
+        } returns Mono.error(BookNotFoundException(id))
 
-        val request = post("/api/books/$id/borrow")
-            .contentType("application/json")
-            .content(""" { "borrower": "$borrower" } """)
-        mvc.perform(request)
-            .andExpect(status().isNotFound)
-            .andDo(document("borrowBookById-notFound"))
+        testClient.post()
+            .uri("/api/books/$id/borrow")
+            .header("Content-Type", APPLICATION_JSON_VALUE)
+            .body(Mono.just(""" { "borrower": "$borrower" } """), String::class.java)
+            .exchange()
+            .expectStatus().isNotFound
+            .expectBody()
+            .consumeWith(document("borrowBookById-notFound"))
     }
 
     // POST on /api/books/{id}/return
 
-    @Test fun `returning book by ID - found borrowed`() {
+    @Test
+    fun `returning book by ID - found borrowed`() {
         val book = availableBook()
-        every { bookCollection.returnBook(book.id) } returns book
+        every { bookCollection.returnBook(book.id) } returns Mono.just(book)
 
-        mvc.perform(post("/api/books/${book.id}/return"))
-            .andExpect(status().isOk)
-            .andDo(document("returnBookById-foundBorrowed"))
+        testClient.post()
+            .uri("/api/books/${book.id}/return")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .consumeWith(document("returnBookById-foundBorrowed"))
     }
 
-    @Test fun `returning book by ID - found already borrowed`() {
+    @Test
+    fun `returning book by ID - found already borrowed`() {
         val id = BookId.generate()
-        every { bookCollection.returnBook(id) } throws BookAlreadyReturnedException(id)
+        every {
+            bookCollection.returnBook(id)
+        } returns Mono.error(BookAlreadyReturnedException(id))
 
-        mvc.perform(post("/api/books/$id/return"))
-            .andExpect(status().isConflict)
-            .andDo(document("returnBookById-foundAlreadyReturned"))
+        testClient.post()
+            .uri("/api/books/$id/return")
+            .exchange()
+            .expectStatus().isEqualTo(CONFLICT)
+            .expectBody()
+            .consumeWith(document("returnBookById-foundAlreadyReturned"))
     }
 
-    @Test fun `returning book by ID - not found`() {
+    @Test
+    fun `returning book by ID - not found`() {
         val id = BookId.generate()
-        every { bookCollection.returnBook(id) } throws BookNotFoundException(id)
+        every {
+            bookCollection.returnBook(id)
+        } returns Mono.error(BookNotFoundException(id))
 
-        mvc.perform(post("/api/books/$id/return"))
-            .andExpect(status().isNotFound)
-            .andDo(document("returnBookById-notFound"))
+        testClient.post()
+            .uri("/api/books/$id/return")
+            .exchange()
+            .expectStatus().isNotFound
+            .expectBody()
+            .consumeWith(document("returnBookById-notFound"))
     }
 
     // utility methods

@@ -51,7 +51,7 @@ internal class FunctionalAcceptanceTest(
 
     @AfterEach
     fun deleteAllBooks() {
-        bookRepository.deleteAll()
+        bookRepository.deleteAll().block()
     }
 
     @Test
@@ -78,9 +78,9 @@ internal class FunctionalAcceptanceTest(
 
         // step 2: delete the book
         val bookLink = createdBook.getLink("self").get()
+
         deleteBookExpecting(bookLink, 204)
         deleteBookExpecting(bookLink, 404)
-
     }
 
     @Test
@@ -245,7 +245,7 @@ internal class FunctionalAcceptanceTest(
         assertThat(allBooks.content)
             .hasSize(3)
             .containsOnly(book1, book2, book3)
-        assertThat(allBooks.getLink("self")).isNotNull()
+        assertThat(allBooks.getLink("self")).isNotNull
 
     }
 

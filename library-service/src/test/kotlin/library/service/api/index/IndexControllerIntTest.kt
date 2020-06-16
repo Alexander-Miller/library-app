@@ -1,45 +1,46 @@
 package library.service.api.index
 
+import brave.Tracer
+import brave.Tracing
 import io.mockk.every
 import io.mockk.mockk
-import library.service.correlation.CorrelationIdHolder
+import library.service.security.SecurityConfiguration
 import library.service.security.UserContext
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.restdocs.AutoConfigureRestDocs
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
+import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
 import org.springframework.hateoas.MediaTypes.HAL_JSON
-import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.reactive.server.WebTestClient
+import reactor.core.publisher.Mono
 import utils.classification.IntegrationTest
 import utils.document
 
 
 @IntegrationTest
-@WebMvcTest(IndexController::class)
+@WebFluxTest(IndexController::class)
 @AutoConfigureRestDocs("build/generated-snippets/index")
 internal class IndexControllerIntTest(
-    @Autowired val mockMvc: MockMvc
+    @Autowired val testClient: WebTestClient
 ) {
 
     @TestConfiguration
+    @Import(SecurityConfiguration::class)
     class AdditionalBeans {
         @Bean
         fun userContext() = mockk<UserContext> {
-            every { isCurator() } returns true
+            every { isCurator() } returns Mono.just(true)
         }
 
         @Bean
-        fun correlationIdHolder() = CorrelationIdHolder()
+        fun tracer(): Tracer = Tracing.newBuilder().build().tracer()
     }
 
     @Test
     fun `get api index returns links to available endpoint actions`() {
-        val request = get("/api")
         val expectedResponse = """
                 {
                   "_links": {
@@ -49,11 +50,14 @@ internal class IndexControllerIntTest(
                   }
                 }
             """
-        mockMvc.perform(request)
-            .andExpect(status().isOk)
-            .andExpect(content().contentType(HAL_JSON))
-            .andExpect(content().json(expectedResponse, true))
-            .andDo(document("getIndex"))
+        testClient.get()
+            .uri("/api")
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentType(HAL_JSON)
+            .expectBody()
+            .json(expectedResponse)
+            .consumeWith(document("getIndex"))
     }
 
 }

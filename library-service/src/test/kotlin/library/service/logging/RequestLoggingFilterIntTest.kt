@@ -1,19 +1,23 @@
 package library.service.logging
 
+import brave.Tracer
+import brave.Tracing
+import io.mockk.every
 import io.mockk.mockk
-import library.service.correlation.CorrelationIdHolder
+import library.service.security.SecurityConfiguration
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
+import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.ComponentScan
-import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.context.annotation.Import
+import org.springframework.test.web.reactive.server.WebTestClient
 import org.testit.testutils.logrecorder.api.LogRecord
 import org.testit.testutils.logrecorder.junit5.RecordLoggers
+import reactor.core.publisher.Mono
 import utils.MutableClock
 import utils.ResetMocksAfterEachTest
 import utils.classification.IntegrationTest
@@ -22,24 +26,28 @@ import utils.testapi.TestService
 
 @IntegrationTest
 @ResetMocksAfterEachTest
-@WebMvcTest(TestController::class)
+@WebFluxTest(TestController::class)
 internal class RequestLoggingFilterIntTest(
     @Autowired val clock: MutableClock,
-    @Autowired val mockMvc: MockMvc
+    @Autowired val testClient: WebTestClient,
+    @Autowired val testService: TestService
 ) {
 
     @TestConfiguration
     @ComponentScan("utils.testapi")
+    @Import(SecurityConfiguration::class)
     class AdditionalBeans {
         @Bean
-        fun correlationIdHolder() = CorrelationIdHolder()
+        fun tracer(): Tracer = Tracing.newBuilder().build().tracer()
+
         @Bean
-        fun testService(): TestService = mockk(relaxed = true)
+        fun testService(): TestService = mockk()
     }
 
     @BeforeEach
     fun setTime() {
         clock.setFixedTime("2017-09-01T12:34:56.789Z")
+        every { testService.doSomething() } returns Mono.empty()
     }
 
     @RecordLoggers(RequestLoggingFilter::class)
@@ -63,18 +71,12 @@ internal class RequestLoggingFilterIntTest(
 
     @RecordLoggers(RequestLoggingFilter::class)
     @Test
-    fun `available client information is logged`(log: LogRecord) = aRequestWillProduceLog(log) { messages ->
-        assertThat(messages[0]).contains("client=127.0.0.1,")
-    }
-
-    @RecordLoggers(RequestLoggingFilter::class)
-    @Test
     fun `request headers are logged`(log: LogRecord) = aRequestWillProduceLog(log) { messages ->
-        assertThat(messages[0]).contains("headers=[]")
+        assertThat(messages[0]).contains("headers=[WebTestClient-Request-Id:")
     }
 
     private fun aRequestWillProduceLog(log: LogRecord, body: (List<String>) -> Unit) {
-        mockMvc.perform(post("/test?foo=bar"))
+        testClient.post().uri("/test?foo=bar").exchange()
         body(log.messages)
     }
 

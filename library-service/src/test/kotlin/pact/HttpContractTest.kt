@@ -26,6 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDO
 import org.springframework.boot.web.server.LocalServerPort
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
+import reactor.core.publisher.Mono
 import utils.Books
 import utils.ResetMocksAfterEachTest
 import utils.classification.ContractTest
@@ -46,8 +47,13 @@ class HttpContractTest(
 ) {
 
     class AdditionalBeans {
-        @Primary @Bean fun bookDataStore(): BookDataStore = mockk()
-        @Primary @Bean fun eventDispatcher(): EventDispatcher<BookEvent> = mockk(relaxed = true)
+        @Primary
+        @Bean
+        fun bookDataStore(): BookDataStore = mockk()
+
+        @Primary
+        @Bean
+        fun eventDispatcher(): EventDispatcher<BookEvent> = mockk(relaxed = true)
     }
 
     @BeforeEach
@@ -65,8 +71,8 @@ class HttpContractTest(
     fun `book with fixed ID exists`(params: Map<String, String>) {
         val bookId = BookId.from(params["bookId"]!!)
         val bookRecord = BookRecord(bookId, Books.THE_MARTIAN)
-        every { dataStore.findById(bookId) } returns bookRecord
-        every { dataStore.createOrUpdate(any()) } answers { firstArg() }
+        every { dataStore.findById(bookId) } returns Mono.just(bookRecord)
+        every { dataStore.createOrUpdate(any()) } answers { Mono.just(firstArg()) }
     }
 
 }

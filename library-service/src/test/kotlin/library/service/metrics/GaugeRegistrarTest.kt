@@ -8,6 +8,7 @@ import library.service.database.BookRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import reactor.core.publisher.Mono
 import utils.classification.UnitTest
 
 @UnitTest
@@ -20,14 +21,14 @@ internal class GaugeRegistrarTest {
     @BeforeEach fun init() = cut.registerGauges()
 
     @Test fun `total number of books`() {
-        every { repository.count() } returns 42
+        every { repository.count() } returns Mono.just(42)
         with(gauge("library.books.total")) {
             assertThat(value()).isEqualTo(42.0)
         }
     }
 
     @Test fun `number of borrowed books`() {
-        every { repository.countByBorrowedNotNull() } returns 42
+        every { repository.countByBorrowedNotNull() } returns Mono.just(42)
         with(gauge("library.books.borrowed")) {
             assertThat(value()).isEqualTo(42.0)
         }

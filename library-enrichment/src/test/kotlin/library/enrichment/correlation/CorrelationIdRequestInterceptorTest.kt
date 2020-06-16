@@ -16,13 +16,13 @@ internal class CorrelationIdRequestInterceptorTest {
     @Test fun `if there is a correlation id in the holder it will be used`() {
         correlationId.setOrGenerate("123-abc")
         cut.apply(template)
-        assertThat(template.headers()["X-Correlation-ID"]).containsOnly("123-abc")
+        assertThat(template.headers()["X-B3-TraceId"]).containsOnly("123-abc")
     }
 
     @Test fun `if there is no correlation id in the holder one will be generated`() {
         correlationId.remove()
         cut.apply(template)
-        assertThat(template.headers()["X-Correlation-ID"])
+        assertThat(template.headers()["X-B3-TraceId"])
                 .allMatch { it.isNotBlank() }
                 .isNotEmpty()
     }

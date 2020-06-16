@@ -5,6 +5,8 @@ import library.service.business.books.domain.BookRecord
 import library.service.business.books.domain.types.BookId
 import library.service.logging.LogMethodEntryAndExit
 import org.springframework.stereotype.Service
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 
 @Service
 @LogMethodEntryAndExit
@@ -14,28 +16,26 @@ class MongoBookDataStore(
         private val bookDocumentToRecordMapper: Mapper<BookDocument, BookRecord>
 ) : BookDataStore {
 
-    override fun createOrUpdate(bookRecord: BookRecord): BookRecord {
+    override fun createOrUpdate(bookRecord: BookRecord): Mono<BookRecord> {
         val document = bookRecordToDocumentMapper.map(bookRecord)
         val updatedDocument = repository.save(document)
-        return bookDocumentToRecordMapper.map(updatedDocument)
+        return updatedDocument.map { bookDocumentToRecordMapper.map(it) }
     }
 
-    override fun delete(bookRecord: BookRecord) {
-        repository.deleteById(bookRecord.id.toUuid())
+    override fun delete(bookRecord: BookRecord): Mono<Void> {
+        return repository.deleteById(bookRecord.id.toUuid())
     }
 
-    override fun findById(id: BookId): BookRecord? {
+    override fun findById(id: BookId): Mono<BookRecord> {
         return repository.findById(id.toUuid())
                 .map(bookDocumentToRecordMapper::map)
-                .orElse(null)
     }
 
-    override fun findAll(): List<BookRecord> {
-        return repository.findAll()
-                .map(bookDocumentToRecordMapper::map)
+    override fun findAll(): Flux<BookRecord> {
+        return repository.findAll().map(bookDocumentToRecordMapper::map)
     }
 
-    override fun existsById(bookId: BookId): Boolean {
+    override fun existsById(bookId: BookId): Mono<Boolean> {
         return repository.existsById(bookId.toUuid())
     }
 

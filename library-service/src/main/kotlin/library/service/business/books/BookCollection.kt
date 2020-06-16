@@ -13,6 +13,8 @@ import library.service.logging.LogMethodEntryAndExit
 import library.service.security.annotations.CanBeExecutedByAnyUser
 import library.service.security.annotations.CanOnlyBeExecutedByCurators
 import org.springframework.stereotype.Service
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 import java.time.Clock
 import java.time.OffsetDateTime
 
@@ -29,10 +31,10 @@ import java.time.OffsetDateTime
 @Service
 @LogMethodEntryAndExit
 class BookCollection(
-        private val clock: Clock,
-        private val dataStore: BookDataStore,
-        private val idGenerator: BookIdGenerator,
-        private val eventDispatcher: EventDispatcher<BookEvent>
+    private val clock: Clock,
+    private val dataStore: BookDataStore,
+    private val idGenerator: BookIdGenerator,
+    private val eventDispatcher: EventDispatcher<BookEvent>
 ) {
 
     /**
@@ -47,12 +49,12 @@ class BookCollection(
      * @return the [BookRecord] for the created book data
      */
     @CanOnlyBeExecutedByCurators
-    fun addBook(book: Book): BookRecord {
-        val bookId = idGenerator.generate()
-        val bookRecord = dataStore.createOrUpdate(BookRecord(bookId, book))
-
-        dispatch(bookAddedEvent(bookRecord))
-        return bookRecord
+    fun addBook(book: Book): Mono<BookRecord> {
+        return idGenerator.generate().flatMap { bookId ->
+            dataStore.createOrUpdate(BookRecord(bookId, book))
+        }.doOnNext { bookRecord ->
+            dispatch(bookAddedEvent(bookRecord))
+        }
     }
 
     private fun bookAddedEvent(bookRecord: BookRecord) = BookAdded(timestamp = now(), bookRecord = bookRecord)
@@ -70,13 +72,14 @@ class BookCollection(
      * @throws BookNotFoundException in case there is no book for the given ID
      */
     @CanOnlyBeExecutedByCurators
-    fun updateBook(id: BookId, updateFunction: (BookRecord) -> BookRecord): BookRecord {
-        val bookRecord = getBook(id)
-        val updatedRecord = updateFunction(bookRecord)
-        val savedAndUpdatedRecord = dataStore.createOrUpdate(updatedRecord)
-
-        dispatch(bookUpdatedEvent(savedAndUpdatedRecord))
-        return savedAndUpdatedRecord
+    fun updateBook(id: BookId, updateFunction: (BookRecord) -> BookRecord): Mono<BookRecord> {
+        return getBook(id).map { bookRecord ->
+            updateFunction(bookRecord)
+        }.flatMap { updatedRecord ->
+            dataStore.createOrUpdate(updatedRecord)
+        }.doOnNext { savedAndUpdatedRecord ->
+            dispatch(bookUpdatedEvent(savedAndUpdatedRecord))
+        }
     }
 
     private fun bookUpdatedEvent(bookRecord: BookRecord) = BookUpdated(timestamp = now(), bookRecord = bookRecord)
@@ -93,8 +96,10 @@ class BookCollection(
      * @throws BookNotFoundException in case there is no book for the given ID
      */
     @CanBeExecutedByAnyUser
-    fun getBook(id: BookId): BookRecord {
-        return dataStore.findById(id) ?: throw BookNotFoundException(id)
+    fun getBook(id: BookId): Mono<BookRecord> {
+        return dataStore.findById(id).switchIfEmpty(
+            Mono.error { BookNotFoundException(id) }
+        )
     }
 
     /**
@@ -106,7 +111,7 @@ class BookCollection(
      * @return a list of all [BookRecord]
      */
     @CanBeExecutedByAnyUser
-    fun getAllBooks(): List<BookRecord> {
+    fun getAllBooks(): Flux<BookRecord> {
         return dataStore.findAll()
     }
 
@@ -122,11 +127,12 @@ class BookCollection(
      * @throws BookNotFoundException in case there is no book for the given ID
      */
     @CanOnlyBeExecutedByCurators
-    fun removeBook(id: BookId) {
-        val bookRecord = getBook(id)
-        dataStore.delete(bookRecord)
-
-        dispatch(bookRemovedEvent(bookRecord))
+    fun removeBook(id: BookId): Mono<Void> {
+        return getBook(id).doOnNext { bookRecord ->
+            dispatch(bookRemovedEvent(bookRecord))
+        }.flatMap { bookRecord ->
+            dataStore.delete(bookRecord)
+        }
     }
 
     private fun bookRemovedEvent(bookRecord: BookRecord) = BookRemoved(timestamp = now(), bookRecord = bookRecord)
@@ -148,13 +154,16 @@ class BookCollection(
      * @throws BookAlreadyBorrowedException in case the book is already borrowed
      */
     @CanBeExecutedByAnyUser
-    fun borrowBook(id: BookId, borrower: Borrower): BookRecord {
-        val bookRecord = getBook(id)
-        val borrowedBookRecord = bookRecord.borrow(borrower, now())
-        val updatedRecord = dataStore.createOrUpdate(borrowedBookRecord)
-
-        dispatch(bookBorrowedEvent(updatedRecord))
-        return updatedRecord
+    fun borrowBook(id: BookId, borrower: Borrower): Mono<BookRecord> {
+        return getBook(id).map {
+            it.borrow(borrower, now())
+        }.flatMap {
+            dataStore.createOrUpdate(it)
+        }.doOnNext { updatedRecord ->
+            dispatch(bookBorrowedEvent(updatedRecord))
+        }.onErrorResume { e ->
+            Mono.error(e)
+        }
     }
 
     private fun bookBorrowedEvent(bookRecord: BookRecord) = BookBorrowed(timestamp = now(), bookRecord = bookRecord)
@@ -174,13 +183,14 @@ class BookCollection(
      * @throws BookAlreadyReturnedException in case the book is already returned
      */
     @CanBeExecutedByAnyUser
-    fun returnBook(id: BookId): BookRecord {
-        val bookRecord = getBook(id)
-        val returnedBookRecord = bookRecord.`return`()
-        val updatedRecord = dataStore.createOrUpdate(returnedBookRecord)
-
-        dispatch(bookReturnedEvent(updatedRecord))
-        return updatedRecord
+    fun returnBook(id: BookId): Mono<BookRecord> {
+        return getBook(id).map { bookRecord ->
+            bookRecord.`return`()
+        }.flatMap { returnedRecord ->
+            dataStore.createOrUpdate(returnedRecord)
+        }.doOnNext { updatedRecord ->
+            dispatch(bookReturnedEvent(updatedRecord))
+        }
     }
 
     private fun bookReturnedEvent(bookRecord: BookRecord) = BookReturned(timestamp = now(), bookRecord = bookRecord)

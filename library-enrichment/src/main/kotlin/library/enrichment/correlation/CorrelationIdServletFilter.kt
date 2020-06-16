@@ -13,7 +13,7 @@ import javax.servlet.http.HttpServletResponse
  * request.
  *
  * Consumer of the library's API can provide a custom correlation ID by setting
- * the `X-Correlation-ID` header. For requests without this header a random
+ * the `X-B3-TraceId` header. For requests without this header a random
  * ID is generated.
  */
 @Component

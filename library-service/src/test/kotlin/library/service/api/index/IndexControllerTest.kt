@@ -7,6 +7,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import reactor.core.publisher.Mono
 import utils.classification.UnitTest
 
 
@@ -18,17 +19,15 @@ internal class IndexControllerTest {
 
     @BeforeEach
     fun setMockDefaults() {
-        every { currentUser.isCurator() } returns false
+        every { currentUser.isCurator() } returns Mono.just(false)
     }
 
-    @Test
-    fun `self link is generated`() {
-        assertThat(cut.get().getLink("self")).isNotNull
+    @Test fun `self link is generated`() {
+        assertThat(cut.get().block()!!.getLink("self")).isNotEmpty
     }
 
-    @Test
-    fun `getBooks link is generated`() {
-        assertThat(cut.get().getLink("getBooks")).isNotNull
+    @Test fun `getBooks link is generated`() {
+        assertThat(cut.get().block()!!.getLink("getBooks")).isNotEmpty
     }
 
     @Nested
@@ -36,14 +35,14 @@ internal class IndexControllerTest {
 
         @Test
         fun `is generated for curator users`() {
-            every { currentUser.isCurator() } returns true
-            assertThat(cut.get().getLink("addBook")).isNotNull
+            every { currentUser.isCurator() } returns Mono.just(true)
+            assertThat(cut.get().block()!!.getLink("addBook")).isNotEmpty
         }
 
         @Test
         fun `is not generated for non-current users`() {
-            every { currentUser.isCurator() } returns false
-            assertThat(cut.get().getLink("addBook")).isEmpty
+            every { currentUser.isCurator() } returns Mono.just(false)
+            assertThat(cut.get().block()!!.getLink("addBook")).isEmpty
         }
 
     }

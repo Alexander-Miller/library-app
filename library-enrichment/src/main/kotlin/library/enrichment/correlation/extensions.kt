@@ -4,7 +4,7 @@ import javax.servlet.http.HttpServletRequest
 import javax.servlet.http.HttpServletResponse
 
 
-internal const val CORRELATION_ID_HEADER = "X-Correlation-ID"
+internal const val CORRELATION_ID_HEADER = "X-B3-TraceId"
 
 internal val HttpServletRequest.correlationId: String?
     get() = getHeader(CORRELATION_ID_HEADER)

@@ -5,7 +5,7 @@ import feign.RequestTemplate
 import org.springframework.stereotype.Component
 
 /**
- * This Feign [RequestInterceptor] will set the `X-Correlation-ID` header for
+ * This Feign [RequestInterceptor] will set the `X-B3-TraceId` header for
  * each send request. This header can be used to trace processing of a single
  * request over many services.
  *
