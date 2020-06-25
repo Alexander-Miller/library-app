@@ -1,4 +1,4 @@
-package library.service.api
+package library.service.api.errors
 
 import library.service.business.exceptions.MalformedValueException
 import library.service.business.exceptions.NotFoundException
@@ -50,11 +50,11 @@ class ErrorHandlers(
     fun handle(
         e: NotFoundException,
         exchange: ServerWebExchange
-    ): Mono<ResponseEntity<ErrorDescription>> {
+    ): Mono<ResponseEntity<ErrorResponse>> {
         log.debug("received request for non existing resource:", e)
-        return errorDescription(
+        return errorResponse(
             exchange,
-            httpStatus = NOT_FOUND,
+            NOT_FOUND,
             message = e.message!!
         )
     }
@@ -64,11 +64,11 @@ class ErrorHandlers(
     fun handle(
         e: NotPossibleException,
         exchange: ServerWebExchange
-    ): Mono<ResponseEntity<ErrorDescription>> {
+    ): Mono<ResponseEntity<ErrorResponse>> {
         log.debug("received conflicting request:", e)
-        return errorDescription(
+        return errorResponse(
             exchange,
-            httpStatus = CONFLICT,
+            CONFLICT,
             message = e.message!!
         )
     }
@@ -78,13 +78,9 @@ class ErrorHandlers(
     fun handle(
         e: MalformedValueException,
         exchange: ServerWebExchange
-    ): Mono<ResponseEntity<ErrorDescription>> {
+    ): Mono<ResponseEntity<ErrorResponse>> {
         log.debug("received malformed request:", e)
-        return errorDescription(
-            exchange,
-            httpStatus = BAD_REQUEST,
-            message = e.message!!
-        )
+        return errorResponse(exchange, BAD_REQUEST, message = e.message!!)
     }
 
     /** In case the request parameter has wrong type. */
@@ -93,11 +89,11 @@ class ErrorHandlers(
     fun handle(
         e: MethodArgumentTypeMismatchException,
         exchange: ServerWebExchange
-    ): Mono<ResponseEntity<ErrorDescription>> {
+    ): Mono<ResponseEntity<ErrorResponse>> {
         log.debug("received bad request:", e)
-        return errorDescription(
+        return errorResponse(
             exchange,
-            httpStatus = BAD_REQUEST,
+            BAD_REQUEST,
             message = "The request's '${e.name}' parameter is malformed."
         )
     }
@@ -108,11 +104,11 @@ class ErrorHandlers(
     fun handle(
         e: HttpMessageNotReadableException,
         exchange: ServerWebExchange
-    ): Mono<ResponseEntity<ErrorDescription>> {
+    ): Mono<ResponseEntity<ErrorResponse>> {
         log.debug("received bad request:", e)
-        return errorDescription(
+        return errorResponse(
             exchange,
-            httpStatus = BAD_REQUEST,
+            BAD_REQUEST,
             message = "The request's body could not be read. It is either empty or malformed."
         )
     }
@@ -123,19 +119,19 @@ class ErrorHandlers(
     fun handle(
         e: ServerWebInputException,
         exchange: ServerWebExchange
-    ): Mono<ResponseEntity<ErrorDescription>> {
+    ): Mono<ResponseEntity<ErrorResponse>> {
         log.debug("received bad request:", e)
         // this is an ugly workaround - with mvc the type mismatch error would not
         // be hidden away as the cause, but on webflux we need to dig like this
         return when (val cause = e.cause) {
-            is TypeMismatchException -> errorDescription(
+            is TypeMismatchException -> errorResponse(
                 exchange,
-                httpStatus = BAD_REQUEST,
+                status = BAD_REQUEST,
                 message = "The parameter '${cause.value}' is malformed."
             )
-            else -> errorDescription(
+            else -> errorResponse(
                 exchange,
-                httpStatus = BAD_REQUEST,
+                status = BAD_REQUEST,
                 message = "The request's body could not be read. It is either empty or malformed."
             )
         }
@@ -147,7 +143,7 @@ class ErrorHandlers(
     fun handle(
         e: MethodArgumentNotValidException,
         exchange: ServerWebExchange
-    ): Mono<ResponseEntity<ErrorDescription>> {
+    ): Mono<ResponseEntity<ErrorResponse>> {
         log.debug("received bad request:", e)
 
         val fieldDetails = e.bindingResult.fieldErrors.map { "The field '${it.field}' ${it.defaultMessage}." }
@@ -155,9 +151,9 @@ class ErrorHandlers(
         val details = fieldDetails + globalDetails
         val sortedDetails = details.sorted()
 
-        return errorDescription(
+        return errorResponse(
             exchange,
-            httpStatus = BAD_REQUEST,
+            status = BAD_REQUEST,
             message = "The request's body is invalid. See details...",
             details = sortedDetails
         )
@@ -169,7 +165,7 @@ class ErrorHandlers(
     fun handle(
         e: WebExchangeBindException,
         exchange: ServerWebExchange
-    ): Mono<ResponseEntity<ErrorDescription>> {
+    ): Mono<ResponseEntity<ErrorResponse>> {
         log.debug("received bad request:", e)
 
         val fieldDetails = e.bindingResult.fieldErrors.map { "The field '${it.field}' ${it.defaultMessage}." }
@@ -177,9 +173,9 @@ class ErrorHandlers(
         val details = fieldDetails + globalDetails
         val sortedDetails = details.sorted()
 
-        return errorDescription(
+        return errorResponse(
             exchange,
-            httpStatus = BAD_REQUEST,
+            status = BAD_REQUEST,
             message = "The request's body is invalid. See details...",
             details = sortedDetails
         )
@@ -190,13 +186,13 @@ class ErrorHandlers(
     fun handle(
         e: AccessDeniedException,
         exchange: ServerWebExchange
-    ): Mono<ResponseEntity<ErrorDescription>> {
+    ): Mono<ResponseEntity<ErrorResponse>> {
         val userName = SecurityContextHolder.getContext()?.authentication?.name
         val request = exchange.request
         log.debug("blocked illegal access from user [{}]: {} {}", userName, request.method, request.uri)
-        return errorDescription(
+        return errorResponse(
             exchange,
-            httpStatus = FORBIDDEN,
+            status = FORBIDDEN,
             message = "You don't have the necessary rights to to this."
         )
     }
@@ -207,37 +203,39 @@ class ErrorHandlers(
     fun handle(
         e: Exception,
         exchange: ServerWebExchange
-    ): Mono<ResponseEntity<ErrorDescription>> {
+    ): Mono<ResponseEntity<ErrorResponse>> {
         log.error("internal server error occurred:", e)
-        return errorDescription(
+        return errorResponse(
             exchange,
-            httpStatus = INTERNAL_SERVER_ERROR,
+            status = INTERNAL_SERVER_ERROR,
             message = "An internal server error occurred, see server logs for more information."
         )
     }
 
-    private fun errorDescription(
+    private fun errorResponse(
         exchange: ServerWebExchange,
-        httpStatus: HttpStatus,
-        message: String,
-        details: List<String> = emptyList()
-    ): Mono<ResponseEntity<ErrorDescription>> {
-        val traceId = exchange.request.headers["X-B3-TraceId"]?.firstOrNull()
-        val description = ErrorDescription(
-            status = httpStatus.value(),
-            error = httpStatus.reasonPhrase,
+        status: HttpStatus,
+        message: String? = null,
+        details: List<String>? = null
+    ): Mono<ResponseEntity<ErrorResponse>> {
+        val response = ErrorResponse(
             timestamp = OffsetDateTime.now(clock).toString(),
-            correlationId = traceId,
+            path = exchange.request.uri.path,
+            status = status.value(),
+            error = status.reasonPhrase,
             message = message,
-            details = details
+            details = details,
+            correlationId = exchange.request.headers["X-B3-TraceId"]?.firstOrNull()
         )
+
         return Mono.just(
             ResponseEntity(
-                description,
+                response,
                 HttpHeaders().apply { contentType = APPLICATION_JSON },
-                httpStatus
+                status
             )
         )
     }
 
 }
+

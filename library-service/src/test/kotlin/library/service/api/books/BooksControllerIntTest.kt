@@ -252,6 +252,7 @@ class BooksControllerIntTest(
 
                 val expectedResponse = """
                     {
+                      "path": "/api/books",
                       "status": 400,
                       "error": "Bad Request",
                       "timestamp": "2017-08-20T12:34:56.789Z",
@@ -277,6 +278,7 @@ class BooksControllerIntTest(
             fun `400 BAD REQUEST for missing required properties`() {
                 val expectedResponse = """
                     {
+                      "path": "/api/books",
                       "status": 400,
                       "error": "Bad Request",
                       "timestamp": "2017-08-20T12:34:56.789Z",
@@ -305,6 +307,7 @@ class BooksControllerIntTest(
             fun `400 BAD REQUEST for malformed request`() {
                 val expectedResponse = """
                     {
+                      "path": "/api/books",
                       "status": 400,
                       "error": "Bad Request",
                       "timestamp": "2017-08-20T12:34:56.789Z",
@@ -410,6 +413,7 @@ class BooksControllerIntTest(
                 fun `404 NOT FOUND for non-existing book`() {
                     val expectedResponse = """
                         {
+                          "path": "/api/books/$id",
                           "status": 404,
                           "error": "Not Found",
                           "timestamp": "2017-08-20T12:34:56.789Z",
@@ -432,6 +436,7 @@ class BooksControllerIntTest(
                 fun `400 BAD REQUEST for malformed ID`() {
                     val expectedResponse = """
                         {
+                          "path": "/api/books/malformed-id",
                           "status": 400,
                           "error": "Bad Request",
                           "timestamp": "2017-08-20T12:34:56.789Z",
@@ -471,6 +476,7 @@ class BooksControllerIntTest(
                 fun `404 NOT FOUND for non-existing book`() {
                     val expectedResponse = """
                         {
+                          "path": "/api/books/$id",
                           "status": 404,
                           "error": "Not Found",
                           "timestamp": "2017-08-20T12:34:56.789Z",
@@ -493,6 +499,7 @@ class BooksControllerIntTest(
                 fun `400 BAD REQUEST for malformed ID`() {
                     val expectedResponse = """
                         {
+                          "path": "/api/books/malformed-id",
                           "status": 400,
                           "error": "Bad Request",
                           "timestamp": "2017-08-20T12:34:56.789Z",
@@ -561,6 +568,7 @@ class BooksControllerIntTest(
                     fun `404 NOT FOUND for non-existing book`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/authors",
                               "status": 404,
                               "error": "Not Found",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -587,6 +595,7 @@ class BooksControllerIntTest(
                     fun `400 BAD REQUEST for missing required properties`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/authors",
                               "status": 400,
                               "error": "Bad Request",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -650,6 +659,7 @@ class BooksControllerIntTest(
                     fun `404 NOT FOUND for non-existing book`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/authors",
                               "status": 404,
                               "error": "Not Found",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -725,6 +735,7 @@ class BooksControllerIntTest(
 
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/borrow",
                               "status": 409,
                               "error": "Conflict",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -751,6 +762,7 @@ class BooksControllerIntTest(
                     fun `404 NOT FOUND for non-existing book`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/borrow",
                               "status": 404,
                               "error": "Not Found",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -776,6 +788,7 @@ class BooksControllerIntTest(
                     fun `400 BAD REQUEST for missing required properties`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/borrow",
                               "status": 400,
                               "error": "Bad Request",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -800,6 +813,7 @@ class BooksControllerIntTest(
                     fun `400 BAD REQUEST for malformed request`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/borrow",
                               "status": 400,
                               "error": "Bad Request",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -821,6 +835,7 @@ class BooksControllerIntTest(
                     fun `400 BAD REQUEST for malformed ID`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/malformed-id/borrow",
                               "status": 400,
                               "error": "Bad Request",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -890,6 +905,7 @@ class BooksControllerIntTest(
                     fun `404 NOT FOUND for non-existing book`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/numberOfPages",
                               "status": 404,
                               "error": "Not Found",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -915,6 +931,7 @@ class BooksControllerIntTest(
                         val idValue = BookId.generate().toString()
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$idValue/numberOfPages",
                               "status": 400,
                               "error": "Bad Request",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -978,6 +995,7 @@ class BooksControllerIntTest(
                     fun `404 NOT FOUND for non-existing book`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/numberOfPages",
                               "status": 404,
                               "error": "Not Found",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -1046,6 +1064,7 @@ class BooksControllerIntTest(
 
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/return",
                               "status": 409,
                               "error": "Conflict",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -1068,6 +1087,7 @@ class BooksControllerIntTest(
                     fun `404 NOT FOUND for non-existing book`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/return",
                               "status": 404,
                               "error": "Not Found",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -1089,6 +1109,7 @@ class BooksControllerIntTest(
                     fun `400 BAD REQUEST for malformed ID`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/malformed-id/return",
                               "status": 400,
                               "error": "Bad Request",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -1157,6 +1178,7 @@ class BooksControllerIntTest(
                     fun `404 NOT FOUND for non-existing book`() {
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$id/title",
                               "status": 404,
                               "error": "Not Found",
                               "timestamp": "2017-08-20T12:34:56.789Z",
@@ -1181,6 +1203,7 @@ class BooksControllerIntTest(
                         val idValue = BookId.generate().toString()
                         val expectedResponse = """
                             {
+                              "path": "/api/books/$idValue/title",
                               "status": 400,
                               "error": "Bad Request",
                               "timestamp": "2017-08-20T12:34:56.789Z",

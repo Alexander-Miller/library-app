@@ -4,6 +4,7 @@ import brave.Tracer
 import brave.Tracing
 import io.mockk.every
 import io.mockk.mockk
+import library.service.api.errors.GlobalErrorWebExceptionHandler
 import library.service.business.exceptions.MalformedValueException
 import library.service.business.exceptions.NotFoundException
 import library.service.business.exceptions.NotPossibleException
@@ -37,7 +38,7 @@ import java.lang.RuntimeException
 import java.util.*
 
 @IntegrationTest
-@WebFluxTest(TestController::class)
+@WebFluxTest(value = [TestController::class, GlobalErrorWebExceptionHandler::class])
 @ComponentScan("utils.testapi")
 internal class ErrorHandlersIntTest(
     @Autowired val testClient: WebTestClient,
@@ -68,6 +69,7 @@ internal class ErrorHandlersIntTest(
         executeAndExpect(NOT_FOUND) {
             """
             {
+              "path": "/test",
               "status": 404,
               "error": "Not Found",
               "timestamp": "2017-09-01T12:34:56.789Z",
@@ -84,6 +86,7 @@ internal class ErrorHandlersIntTest(
         executeAndExpect(CONFLICT) {
             """
             {
+              "path": "/test",
               "status": 409,
               "error": "Conflict",
               "timestamp": "2017-09-01T12:34:56.789Z",
@@ -100,6 +103,7 @@ internal class ErrorHandlersIntTest(
         executeAndExpect(BAD_REQUEST) {
             """
             {
+              "path": "/test",
               "status": 400,
               "error": "Bad Request",
               "timestamp": "2017-09-01T12:34:56.789Z",
@@ -124,6 +128,7 @@ internal class ErrorHandlersIntTest(
         executeAndExpect(BAD_REQUEST) {
             """
             {
+              "path": "/test",
               "status": 400,
               "error": "Bad Request",
               "timestamp": "2017-09-01T12:34:56.789Z",
@@ -140,6 +145,7 @@ internal class ErrorHandlersIntTest(
         executeAndExpect(BAD_REQUEST) {
             """
             {
+              "path": "/test",
               "status": 400,
               "error": "Bad Request",
               "timestamp": "2017-09-01T12:34:56.789Z",
@@ -157,6 +163,7 @@ internal class ErrorHandlersIntTest(
         executeAndExpect(BAD_REQUEST) {
             """
             {
+              "path": "/test",
               "status": 400,
               "error": "Bad Request",
               "timestamp": "2017-09-01T12:34:56.789Z",
@@ -193,6 +200,7 @@ internal class ErrorHandlersIntTest(
         executeAndExpect(FORBIDDEN) {
             """
             {
+              "path": "/test",
               "status": 403,
               "error": "Forbidden",
               "timestamp": "2017-09-01T12:34:56.789Z",
@@ -209,6 +217,7 @@ internal class ErrorHandlersIntTest(
         executeAndExpect(INTERNAL_SERVER_ERROR) {
             """
             {
+              "path": "/test",
               "status": 500,
               "error": "Internal Server Error",
               "timestamp": "2017-09-01T12:34:56.789Z",
